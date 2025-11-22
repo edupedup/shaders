@@ -1,0 +1,125 @@
+// ShaderToy fragment shader
+// Champ de "cellules" colorées façon heatmap, avec bande centrale vide
+
+// --- Hash / pseudo-aléatoire --------------------------------------------
+
+float hash11(float n) {
+    return fract(sin(n) * 43758.5453123);
+}
+
+float hash21(vec2 p) {
+    return hash11(dot(p, vec2(127.1, 311.7)));
+}
+
+vec2 hash22(vec2 p) {
+    float n = dot(p, vec2(127.1, 311.7));
+    return fract(vec2(sin(n), cos(n)) * 43758.5453);
+}
+
+// --- Palette type "heatmap" (rouge -> jaune -> cyan -> bleu) ------------
+
+vec3 heatPalette(float t) {
+    t = clamp(t, 0.0, 1.0);
+    // on interpole manuellement quelques couleurs clés
+    vec3 c1 = vec3(0.0, 0.0, 0.3);   // bleu foncé
+    vec3 c2 = vec3(0.0, 0.7, 1.0);   // cyan
+    vec3 c3 = vec3(1.0, 1.0, 0.0);   // jaune
+    vec3 c4 = vec3(1.0, 0.2, 0.0);   // rouge
+
+    if (t < 0.33) {
+        float k = t / 0.33;
+        return mix(c1, c2, k);
+    } else if (t < 0.66) {
+        float k = (t - 0.33) / 0.33;
+        return mix(c2, c3, k);
+    } else {
+        float k = (t - 0.66) / 0.34;
+        return mix(c3, c4, k);
+    }
+}
+
+// --- Calcul des "cellules" ----------------------------------------------
+//
+// On pose une grille, chaque case contient un petit disque
+// dont la position bouge doucement avec le temps.
+// On additionne la contribution de plusieurs disques proches.
+
+float cellsField(vec2 p, float time) {
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+
+    float v = 0.0;
+
+    // on regarde les 9 cellules autour
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            vec2 cell = ip + vec2(i, j);
+
+            // centre pseudo-aléatoire dans la cellule
+            vec2 rnd = hash22(cell) - 0.5;
+
+            // petit mouvement oscillant
+            float a = hash21(cell) * 6.28318;
+            vec2 move = vec2(cos(a + time * 0.6), sin(a + time * 0.9)) * 0.25;
+
+            vec2 center = cell + rnd + move; // déjà en coords monde
+            vec2 d = p - center;             // p au lieu de fp
+            
+            float dist = length(d);
+
+            // forme de "tache" douce : gaussienne inversée
+            float spot = exp(-dist * 12.0); // plus grand => plus petit point
+
+            // on cumule mais on clampera plus tard
+            v += spot * 10.0;
+        }
+    }
+
+    return v;
+}
+
+// --- MAIN ----------------------------------------------------------------
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    // coords normalisées
+    vec2 uv = fragCoord.xy / iResolution.xy;
+    uv -= 0.5;
+    uv.x *= iResolution.x / iResolution.y;
+
+    float t = iTime;
+
+    // zoom global : augmente pour plus de petites cellules
+    float zoom = 10.0;
+    vec2 p = uv * zoom;
+
+    // champ de cellules
+    float field = cellsField(p, t * .4); // vitesse
+ 
+    // on normalise / compresse le champ
+    float v = clamp(field * 1.5, 0.0, 1.5);
+    v = clamp(v, 0.0, 1.0);
+
+    // pour créer un bord plus lumineux autour des points,
+    // on accentue les contours
+    //float edge = smoothstep(0., 0.5, v);
+    float edge = smoothstep(0.05, mod(t, 10.0), v);
+    float ring = edge * (10.0 - smoothstep(0.6, 1.0, v));
+
+    // valeur finale utilisée pour la palette
+    float intensity = v * 0.6 + ring * 0.7;
+
+    // couleur façon heatmap
+    vec3 col = heatPalette(intensity);
+
+    // fond sombre bordeaux comme sur ton image
+    vec3 bg = vec3(0.15, 0.0, 0.1);
+
+    // mix avec le fond selon la présence des cellules
+    float mask = smoothstep(0.1, 0.25, v + ring);
+    col = mix(bg, col, mask);
+
+    // on applique la bande centrale vide
+
+    fragColor = vec4(col, 1.0);
+}

@@ -1,0 +1,129 @@
+// ShaderToy fragment shader
+
+// --- HASH & NOISE -----------------------------------------------------
+
+float hash(vec2 p) {
+    p = fract(p * vec2(123.34, 345.45));
+    p += dot(p, p + 34.345);
+    return fract(p.x * p.y);
+}
+
+// Bruit value 2D
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+
+    vec2 u = f * f * (3.0 - 2.0 * f);
+
+    float x1 = mix(a, b, u.x);
+    float x2 = mix(c, d, u.x);
+
+    return mix(x1, x2, u.y);
+}
+
+// --- FBM (Fractal Brownian Motion) ------------------------------------
+
+float fbm(vec2 p) {
+    float v    = 0.0;
+    float amp  = 0.9;  // amplitude de départ (plus grand = plus contrasté)
+    float freq = 1.0;
+
+    for (int i = 0; i < 5; i++) {
+        v += amp * noise(p * freq);
+        freq *= 2.0;    // bruit de plus en plus fin
+        amp  *= 0.2;    // chaque octave compte moins
+    }
+    return v;
+}
+
+// --- PALETTE COULEUR --------------------------------------------------
+
+vec3 palette(float t) {
+    // Palette type IQ
+vec3 a = vec3(0.3);
+vec3 b = vec3(0.8, 0.8, 0.8);  // augmentation → couleurs plus vives
+vec3 c = vec3(1.0, 1.0, 1.0);
+vec3 d = vec3(0.00, 0.33, 0.67);
+
+    return a + b * cos(6.28318 * (c * t + d));
+}
+
+// --- DISTORSION LIQUIDE -----------------------------------------------
+
+vec2 liquidWarp(vec2 p, float t) {
+    // Deux champs de déplacement différents pour X et Y
+    float dx = fbm(p + vec2(0.0, t));
+    float dy = fbm(p + vec2(5.23, t * 0.7));
+
+    // On recentre autour de 0 pour éviter un drift total
+    vec2 d = vec2(dx, dy) - 0.5;
+    return d;
+}
+
+float oscillation(float t) {
+    float minVal = 0.001;
+    float maxVal = 0.3;
+
+    // période de 90 secondes (un cycle complet)
+    float period = 90.0;
+    float phase = t * (6.28318 / period); // 2π = 6.28318
+
+    // remapping du cosinus dans l’intervalle [minVal, maxVal]
+    return minVal + (maxVal - minVal) * 0.5 * (1.0 + cos(phase));
+}
+
+
+// --- MAINIMAGE --------------------------------------------------------
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    // Coordonnées normalisées
+    vec2 uv = fragCoord.xy / iResolution.xy;
+    uv -= 0.5;
+    uv.x *= iResolution.x / iResolution.y;
+
+    // Zoom de base
+    float zoom = 1.0;
+    vec2 p = uv * zoom;
+
+    // Temps
+    float t = iTime * 0.6;
+
+    // Distorsion liquide : on tord les coordonnées avant d'échantillonner
+    vec2 d1 = liquidWarp(p, t);
+    vec2 d2 = liquidWarp(p * 2.0, t * 1.5);
+    p += d1 * 1.0 + d2 * 0.5; // combine deux échelles de distorsion
+
+    // Base : fbm sur les coordonnées tordues
+    float v = fbm(p);
+
+    // Veines / contours via gradient approximé
+    float eps = 0.03;
+    float v1 = fbm(p + vec2(eps, 0.0));
+    float v2 = fbm(p + vec2(0.0, eps));
+    float grad = length(vec2(v1 - v, v2 - v));
+
+    // Plus le gradient est fort, plus on a une ligne
+    float lines = smoothstep(0.15, 0.45, grad);
+
+    // On mélange base + lignes pour un effet labyrinthe/veines
+    float pattern = v + lines * 2.0;
+
+    // Quantification pour faire des "niveaux" comme sur une carte
+    float quant = oscillation(iTime);
+    
+    float stepped = floor(pattern / quant) * quant;
+
+    // Couleurs
+    vec3 col = palette(stepped * 2.5);
+
+    // Booster contrast / courbe
+    col = pow(col, vec3(0.8));
+
+    fragColor = vec4(col, 1.0);
+}

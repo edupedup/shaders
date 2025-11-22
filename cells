@@ -1,0 +1,117 @@
+// ShaderToy fragment shader
+// Cellules rouges arrondies, animées
+
+// --- Hash utils --------------------------------------------------------
+
+float hash11(float n) {
+    return fract(sin(n) * 43758.5453123);
+}
+
+float hash21(vec2 p) {
+    return hash11(dot(p, vec2(127.1, 311.7)));
+}
+
+vec2 hash22(vec2 p) {
+    float n = dot(p, vec2(127.1, 311.7));
+    return fract(vec2(sin(n), cos(n)) * 43758.5453);
+}
+
+// --- Voronoi animé -----------------------------------------------------
+
+struct VoronoiData {
+    float d1;      // distance au site le plus proche
+    float d2;      // distance au 2e site
+    vec2  nearest; // position du site le plus proche
+};
+
+VoronoiData voronoiAnimated(vec2 p, float time) {
+    vec2 ip = floor(p);
+
+    float minDist1 = 1e9;
+    float minDist2 = 1e9;
+    vec2 bestSite = vec2(0.0);
+
+    // voisinage 3x3 (suffisant ici)
+    for (int j = -1; j <= 1; j++) {
+        for (int i = -1; i <= 1; i++) {
+            vec2 cell = ip + vec2(i, j);
+
+            // position pseudo-aléatoire de base
+            vec2 rnd = hash22(cell);
+
+            // mouvement circulaire léger en fonction du temps
+            float a = hash21(cell) * 6.28318;
+            float r = 0.25; // rayon du mouvement
+            vec2 offset = vec2(
+                cos(a + time * 0.7),
+                sin(a + time * 0.7)
+            ) * r;
+
+            vec2 site = cell + rnd + offset;
+
+            float d = length(site - p);
+
+            if (d < minDist1) {
+                minDist2 = minDist1;
+                minDist1 = d;
+                bestSite = site;
+            } else if (d < minDist2) {
+                minDist2 = d;
+            }
+        }
+    }
+
+    VoronoiData v;
+    v.d1 = minDist1;
+    v.d2 = minDist2;
+    v.nearest = bestSite;
+    return v;
+}
+
+// --- MAIN --------------------------------------------------------------
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    // coords normalisées centrées
+    vec2 uv = fragCoord.xy / iResolution.xy;
+    uv -= 0.5;
+    uv.x *= iResolution.x / iResolution.y;
+
+    float t = iTime;
+
+    // zoom global + léger "breathing" sur le temps
+    float zoomBase = 6.0;
+    float zoomPulse = 1.0 + 0.1 * sin(t * 0.5); // respire un peu
+    float zoom = zoomBase * zoomPulse;
+
+    vec2 p = uv * zoom;
+
+    // Voronoi animé
+    VoronoiData v = voronoiAnimated(p, t * 0.5);
+
+    // distance pour bord entre cellules
+    float edge = v.d2 - v.d1;
+
+    // lignes : plus edge est petit, plus on est sur un bord
+    float line = 0.1 - smoothstep(0.03, 0.12, edge);
+
+    // "cellule arrondie" : glow autour du centre
+    float cellGlow = smoothstep(2.0, 0.0, v.d1);
+
+    // pulsation de l'intensité des cellules
+    float pulse = 0.7 + 0.8 * sin(t * 1.3 + v.d1 * 4.0);
+
+    vec3 col = vec3(0.0);
+    vec3 red = vec3(0.9, 0.15, 0.08);
+
+    // bord bien rouge
+    col += red * line * 0.1;
+
+    // intérieur de cellule animé
+    col += red * 2.0 * cellGlow * pulse;
+
+    // léger gamma pour lisser
+    col = pow(col, vec3(0.9));
+
+    fragColor = vec4(col, 1.0);
+}
